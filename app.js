@@ -39,7 +39,18 @@ class App {
     }
 
     initializeRoutes() {
-        // Health check
+
+        // ✅ Root route (NEW)
+        this.app.get('/', (req, res) => {
+            res.status(200).json({
+                success: true,
+                message: '🚀 Server is running successfully',
+                api: '/api/v1',
+                health: '/health'
+            });
+        });
+
+        // ✅ Health check
         this.app.get('/health', (req, res) => {
             res.status(200).json({
                 status: 'OK',
@@ -48,10 +59,15 @@ class App {
             });
         });
 
-        // API routes
+        // ✅ Ping route (optional)
+        this.app.get('/ping', (req, res) => {
+            res.send('pong');
+        });
+
+        // ✅ API routes
         this.app.use('/api/v1/auth', require('./routes/auth.routes'));
 
-        // 404 handler - FIXED: removed '*'
+        // ❌ 404 handler
         this.app.use((req, res) => {
             res.status(404).json({
                 success: false,
@@ -66,12 +82,16 @@ class App {
 
     listen() {
         const server = this.app.listen(env.PORT, () => {
+
+            // ✅ Fix production URL
+            const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${env.PORT}`;
+
             logger.info(`
-                ################################################
-                🚀 Server listening on port: ${env.PORT}
-                🌍 Environment: ${env.NODE_ENV}
-                📝 API: http://localhost:${env.PORT}/api/v1
-                ################################################
+################################################
+🚀 Server listening on port: ${env.PORT}
+🌍 Environment: ${env.NODE_ENV}
+📝 API: ${baseUrl}/api/v1
+################################################
             `);
         });
 
