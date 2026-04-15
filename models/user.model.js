@@ -1,82 +1,105 @@
-    const mongoose = require('mongoose');
+const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-const env = require('../config/env');
 
 const userSchema = new mongoose.Schema({
+    // Step 1 - Basic Info
     name: {
         type: String,
         required: [true, 'Name is required'],
-        trim: true,
-        minlength: [2, 'Name must be at least 2 characters'],
-        maxlength: [50, 'Name cannot exceed 50 characters'],
-        index: true
+        trim: true
     },
     email: {
         type: String,
         required: [true, 'Email is required'],
         unique: true,
         lowercase: true,
-        trim: true,
-        index: { unique: true },
-        match: [
-            /^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/,
-            'Please enter a valid email address'
-        ]
+        trim: true
+    },
+    phone: {
+        type: String,
+        required: [true, 'Phone number is required'],
+        unique: true
     },
     password: {
         type: String,
         required: [true, 'Password is required'],
-        minlength: [6, 'Password must be at least 6 characters'],
-        select: false // Don't return password by default
+        select: false
     },
-    isActive: {
-        type: Boolean,
-        default: true,
-        index: true
-    },
-    lastLogin: {
-        type: Date
-    },
+    
+    // Step 2 - Role
     role: {
         type: String,
-        enum: ['user', 'admin'],
-        default: 'user'
+        enum: ['buyer', 'realtor', null],
+        default: null
+    },
+    
+    // Step 3 - Profile Complete Flag
+    isProfileComplete: {
+        type: Boolean,
+        default: false
+    },
+    
+    // Common Profile Fields
+    profilePhoto: {
+        type: String,
+        default: null
+    },
+    // In models/user.model.js - Add these fields
+resetPasswordToken: {
+    type: String,
+    default: null,
+    index: true
+},
+resetPasswordExpires: {
+    type: Date,
+    default: null
+},
+
+
+    // Realtor Specific Fields
+    agencyName: String,
+    licenseNumber: {
+        type: String,
+        unique: true,
+        sparse: true
+    },
+    yearsOfExperience: Number,
+    bio: String,
+    serviceCountry: String,
+    serviceCity: String,
+    
+    // Buyer Specific Fields
+    preferences: {
+        type: Object,
+        default: {}
     }
+    
 }, {
-    timestamps: true,
-    toJSON: { virtuals: true },
-    toObject: { virtuals: true }
+    timestamps: true
 });
 
-// Indexes
-userSchema.index({ email: 1, isActive: 1 });
-userSchema.index({ createdAt: -1 });
-
-// Pre-save middleware
+// Hash password
 userSchema.pre('save', async function() {
     if (!this.isModified('password')) return ;
     
     try {
-        this.password = await bcrypt.hash(this.password, env.BCRYPT_ROUNDS);
+        const salt = await bcrypt.genSalt(10);
+        this.password = await bcrypt.hash(this.password, salt);
     } catch (error) {
     }
 });
 
-// Instance methods
+// Compare password
 userSchema.methods.comparePassword = async function(candidatePassword) {
     return await bcrypt.compare(candidatePassword, this.password);
 };
 
+// Remove password from JSON
 userSchema.methods.toJSON = function() {
     const user = this.toObject();
     delete user.password;
     delete user.__v;
     return user;
-};
-
-// Static methods
-userSchema.statics.findByEmail = function(email) {
-    return this.findOne({ email }).select('+password');
 };
 
 module.exports = mongoose.model('User', userSchema);

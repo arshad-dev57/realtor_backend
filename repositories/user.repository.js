@@ -5,23 +5,28 @@ class UserRepository {
         const user = new User(userData);
         return await user.save();
     }
-
-    async findByEmail(email, includePassword = false) {
-        const query = User.findOne({ email, isActive: true });
-        if (includePassword) {
-            query.select('+password');
-        }
-        return await query;
+    
+    async findByEmailOrPhone(email, phone) {
+        return await User.findOne({
+            $or: [{ email }, { phone }]
+        });
     }
-
-    async findById(id, includePassword = false) {
-        const query = User.findById(id);
-        if (includePassword) {
-            query.select('+password');
-        }
-        return await query;
+    
+    async findByEmailWithPassword(email) {
+        return await User.findOne({ email }).select('+password');
     }
-
+    
+    async findById(id) {
+        return await User.findById(id);
+    }
+    
+    async findByLicenseNumber(licenseNumber, excludeUserId) {
+        return await User.findOne({
+            licenseNumber,
+            _id: { $ne: excludeUserId }
+        });
+    }
+    
     async update(id, updateData) {
         return await User.findByIdAndUpdate(
             id,
@@ -29,14 +34,8 @@ class UserRepository {
             { new: true, runValidators: true }
         );
     }
-
-    async delete(id) {
-        return await User.findByIdAndUpdate(id, { isActive: false });
-    }
-
-    async exists(email) {
-        return await User.exists({ email, isActive: true });
-    }
+    
 }
 
-module.exports = new UserRepository();
+
+module.exports = new UserRepository();  

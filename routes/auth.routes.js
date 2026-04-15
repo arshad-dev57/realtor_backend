@@ -1,19 +1,15 @@
 const router = require('express').Router();
 const AuthController = require('../controllers/auth.controller');
-const validate = require('../middlewares/validation.middleware');
-const { registerValidation } = require('../validations/auth.validation');
-const { authLimiter } = require('../middlewares/rateLimiter.middleware');
+router.post('/signup', AuthController.signup);
+router.post('/select-role', AuthController.selectRole);
+router.put('/complete-buyer/:userId', AuthController.completeBuyerProfile);
+router.put('/complete-realtor/:userId', AuthController.completeRealtorProfile);
+router.get('/status/:userId', AuthController.getUserStatus);
+router.post('/login', AuthController.login);
 
-/**
- * @route POST /api/v1/auth/register
- * @desc Register a new user
- * @access Public
- */
-router.post(
-    '/register',
-    authLimiter,
-    validate(registerValidation),
-    AuthController.register
-);
+router.post('/forgot-password', AuthController.forgotPassword);  // Send OT
+
+router.post('/verify-otp', AuthController.verifyOTP);           // Verify OTP
+router.post('/reset-password', AuthController.resetPassword);   // Reset password
 
 module.exports = router;
