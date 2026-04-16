@@ -719,7 +719,6 @@ async getPropertyById(req, res) {
             });
         }
     }
-
 async getPropertiesByCity(req, res) {
     try {
         const { city } = req.params;
@@ -735,92 +734,75 @@ async getPropertiesByCity(req, res) {
             maxArea,
             propertyTypes,
             sortBy = 'newest',
-            limit = 20
+            page = 1,      // Naya: page number fetch kiya
+            limit = 6      // Updated: default limit 6 kar di
         } = req.query;
-        
+
+        // Convert strings to numbers for pagination
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+        const skip = (pageNum - 1) * limitNum;
+
         // Build query
         let query = { 'location.city': { $regex: new RegExp(city, 'i') } };
-        
-        // Filter by property type
+
+        // --- Filters Logic (Same as before) ---
         if (type && type !== 'All') {
             query.type = type;
         }
-        
-        // Filter by price range
+
         if (minPrice || maxPrice) {
             query.price = {};
-            if (minPrice && minPrice !== 'No min') {
-                query.price.$gte = parseInt(minPrice);
-            }
-            if (maxPrice && maxPrice !== 'No max') {
-                query.price.$lte = parseInt(maxPrice);
-            }
+            if (minPrice && minPrice !== 'No min') query.price.$gte = parseInt(minPrice);
+            if (maxPrice && maxPrice !== 'No max') query.price.$lte = parseInt(maxPrice);
         }
-        
-        // Filter by bedrooms
+
         if (minBedrooms && minBedrooms !== 'No min' && minBedrooms !== 'Studio') {
             query.bedrooms = {};
-            if (minBedrooms !== 'No min') {
-                query.bedrooms.$gte = parseInt(minBedrooms);
-            }
-            if (maxBedrooms && maxBedrooms !== 'No max') {
-                query.bedrooms.$lte = parseInt(maxBedrooms);
-            }
+            query.bedrooms.$gte = parseInt(minBedrooms);
+            if (maxBedrooms && maxBedrooms !== 'No max') query.bedrooms.$lte = parseInt(maxBedrooms);
         }
-        
-        // Filter by bathrooms
+
         if (minBathrooms && minBathrooms !== 'No min') {
             query.bathrooms = {};
-            if (minBathrooms !== 'No min') {
-                query.bathrooms.$gte = parseInt(minBathrooms);
-            }
-            if (maxBathrooms && maxBathrooms !== 'No max') {
-                query.bathrooms.$lte = parseInt(maxBathrooms);
-            }
+            query.bathrooms.$gte = parseInt(minBathrooms);
+            if (maxBathrooms && maxBathrooms !== 'No max') query.bathrooms.$lte = parseInt(maxBathrooms);
         }
-        
-        // Filter by area
+
         if (minArea && minArea !== 'No min') {
             query['area.value'] = {};
             const minAreaValue = parseInt(minArea.replace(' sqft', '').replace('+', ''));
-            if (minArea !== 'No min') {
-                query['area.value'].$gte = minAreaValue;
-            }
+            query['area.value'].$gte = minAreaValue;
             if (maxArea && maxArea !== 'No max') {
                 const maxAreaValue = parseInt(maxArea.replace(' sqft', '').replace('+', ''));
                 query['area.value'].$lte = maxAreaValue;
             }
         }
-        
-        // Filter by property types
+
         if (propertyTypes && propertyTypes.length > 0) {
             const types = propertyTypes.split(',');
             query.propertyType = { $in: types };
         }
-        
-        // Sorting
+
+        // Sorting Logic
         let sort = {};
         switch (sortBy) {
-            case 'newest':
-                sort = { createdAt: -1 };
-                break;
-            case 'Lowest Price':
-                sort = { price: 1 };
-                break;
-            case 'Highest Price':
-                sort = { price: -1 };
-                break;
-            case 'Most Popular':
-                sort = { isFeatured: -1, createdAt: -1 };
-                break;
-            default:
-                sort = { createdAt: -1 };
+            case 'newest': sort = { createdAt: -1 }; break;
+            case 'Lowest Price': sort = { price: 1 }; break;
+            case 'Highest Price': sort = { price: -1 }; break;
+            case 'Most Popular': sort = { isFeatured: -1, createdAt: -1 }; break;
+            default: sort = { createdAt: -1 };
         }
-        
+
+        // --- Pagination Implementation ---
+        // 1. Total count nikalein (pagination UI ke liye)
+        const total = await Property.countDocuments(query);
+
+        // 2. Query execute karein with limit and skip
         const properties = await Property.find(query)
             .sort(sort)
-            .limit(parseInt(limit));
-
+            .skip(skip)   // Itne records chorr do
+            .limit(limitNum); // Sirf 6 records lo
 
         const formattedProperties = properties.map(prop => ({
             id: prop._id,
@@ -839,13 +821,19 @@ async getPropertiesByCity(req, res) {
             isFavorite: false,
             propertyType: prop.propertyType
         }));
-        
+
         res.status(200).json({
             success: true,
             count: formattedProperties.length,
+            pagination: {
+                total,              // Total properties kitni hain
+                currentPage: pageNum,
+                totalPages: Math.ceil(total / limitNum), // Total pages kitne bane
+                limit: limitNum
+            },
             data: formattedProperties
         });
-        
+
     } catch (error) {
         console.error('Get properties error:', error);
         res.status(500).json({
@@ -854,7 +842,6 @@ async getPropertiesByCity(req, res) {
         });
     }
 }
-
 
 
 async searchProperties(req, res) {

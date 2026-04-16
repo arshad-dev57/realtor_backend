@@ -17,9 +17,8 @@ class App {
     initializeMiddlewares() {
         this.app.use(helmet());
         
-        // CORS - Allow all for development
         this.app.use(cors({
-            origin: '*', // Allow all origins
+            origin: '*',
             credentials: true,
             methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
             allowedHeaders: ['Content-Type', 'Authorization']
@@ -52,10 +51,21 @@ class App {
                 environment: env.NODE_ENV
             });
         });
+        
+        // Auth routes
         this.app.use('/api/v1/auth', require('./routes/auth.routes'));
-                this.app.use('/api/v1/property',require('./routes/property.routes'));
+        
+        // Property routes
+        this.app.use('/api/v1/property', require('./routes/property.routes'));
+        
+        // Contact/Email routes
+        this.app.use('/api/v1/contact', require('./routes/email.routes'));
+        // In your App.js, add this line with other routes
+this.app.use('/api/v1/dashboard', require('./routes/dashboard.routes'));    
+        // ✅ Tour routes - YAHAN ADD KARO
+        this.app.use('/api/v1/tours', require('./routes/tour.routes'));
 
-
+        // 404 handler
         this.app.use((req, res) => {
             res.status(404).json({
                 success: false,
@@ -69,13 +79,11 @@ class App {
     }
 
     listen() {
-        // Bind to all network interfaces
         const server = this.app.listen(env.PORT, '0.0.0.0', () => {
             const os = require('os');
             const networkInterfaces = os.networkInterfaces();
             let localIp = 'localhost';
             
-            // Find local IP address
             for (const interfaceName in networkInterfaces) {
                 for (const iface of networkInterfaces[interfaceName]) {
                     if (iface.family === 'IPv4' && !iface.internal) {
@@ -93,9 +101,13 @@ class App {
 ║  🌐 Network:  http://${localIp}:${env.PORT}              ║
 ║  📝 API:      http://${localIp}:${env.PORT}/api/v1      ║
 ║  🧪 Health:   http://${localIp}:${env.PORT}/health      ║
+║  🚗 Tours:    http://${localIp}:${env.PORT}/api/v1/tours ║
 ╠══════════════════════════════════════════════════════════╣
-║  💡 Share this Network URL with other devices:          ║
-║  http://${localIp}:${env.PORT}                          ║
+║  💡 Tour Endpoints:                                     ║
+║  POST   /api/v1/tours/schedule - Schedule a tour       ║
+║  GET    /api/v1/tours/my-tours  - Get my tours         ║
+║  GET    /api/v1/tours/:id       - Get tour by ID       ║
+║  PUT    /api/v1/tours/:id/cancel - Cancel tour         ║
 ╚══════════════════════════════════════════════════════════╝
             `);
         });

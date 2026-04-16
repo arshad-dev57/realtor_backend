@@ -1,4 +1,3 @@
-// backend/models/tour.model.js
 const mongoose = require('mongoose');
 
 const tourSchema = new mongoose.Schema({
@@ -40,6 +39,10 @@ const tourSchema = new mongoose.Schema({
         type: String,
         enum: ['pending', 'confirmed', 'cancelled', 'completed'],
         default: 'pending'
+    },
+    notes: {
+        type: String,
+        default: ''
     },
     createdAt: {
         type: Date,

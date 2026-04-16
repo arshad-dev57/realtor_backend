@@ -580,6 +580,179 @@ class AuthController {
             });
         }
     }
+
+    // Add this method to your AuthController class
+
+// Get User Profile (Complete profile data)
+async getProfile(req, res) {
+    try {
+        const userId = req.user.userId; // From auth middleware
+        
+        const user = await User.findById(userId);
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+        
+        // Prepare response based on role
+        const profileData = {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            role: user.role,
+            isProfileComplete: user.isProfileComplete,
+            profilePhoto: user.profilePhoto || null,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt
+        };
+        
+        // Add buyer specific fields
+        if (user.role === 'buyer') {
+            profileData.preferences = user.preferences || [];
+        }
+        
+        // Add realtor specific fields
+        if (user.role === 'realtor') {
+            profileData.agencyName = user.agencyName || null;
+            profileData.licenseNumber = user.licenseNumber || null;
+            profileData.yearsOfExperience = user.yearsOfExperience || null;
+            profileData.bio = user.bio || null;
+            profileData.serviceCountry = user.serviceCountry || null;
+            profileData.serviceCity = user.serviceCity || null;
+            profileData.totalProperties = user.totalProperties || 0;
+            profileData.totalSales = user.totalSales || 0;
+            profileData.rating = user.rating || 0;
+            profileData.reviewCount = user.reviewCount || 0;
+        }
+        
+        console.log(`📋 Profile fetched for user: ${user.email} (${user.role})`);
+        
+        res.status(200).json({
+            success: true,
+            data: profileData
+        });
+    } catch (error) {
+        console.error('Get profile error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+}
+
+// Update User Profile (Partial update)
+async updateProfile(req, res) {
+    try {
+        const userId = req.user.userId;
+        const updates = req.body;
+        
+        // Allowed fields to update
+        const allowedUpdates = [
+            'name', 'phone', 'profilePhoto', 'bio',
+            'preferences', 'agencyName', 'serviceCountry', 'serviceCity'
+        ];
+        
+        const updateData = {};
+        for (const key of allowedUpdates) {
+            if (updates[key] !== undefined) {
+                updateData[key] = updates[key];
+            }
+        }
+        
+        const user = await User.findByIdAndUpdate(
+            userId,
+            updateData,
+            { new: true, runValidators: true }
+        );
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+        
+        console.log(`✏️ Profile updated for user: ${user.email}`);
+        
+        res.status(200).json({
+            success: true,
+            message: 'Profile updated successfully',
+            data: user.toJSON()
+        });
+    } catch (error) {
+        console.error('Update profile error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+}
+
+// Change Password
+async changePassword(req, res) {
+    try {
+        const userId = req.user.userId;
+        const { currentPassword, newPassword, confirmPassword } = req.body;
+        
+        if (!currentPassword || !newPassword || !confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'All fields are required'
+            });
+        }
+        
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'New passwords do not match'
+            });
+        }
+        
+        if (newPassword.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: 'Password must be at least 6 characters'
+            });
+        }
+        
+        const user = await User.findById(userId).select('+password');
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+        
+        const isPasswordValid = await user.comparePassword(currentPassword);
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                success: false,
+                message: 'Current password is incorrect'
+            });
+        }
+        
+        user.password = newPassword;
+        await user.save();
+        
+        console.log(`🔐 Password changed for user: ${user.email}`);
+        
+        res.status(200).json({
+            success: true,
+            message: 'Password changed successfully'
+        });
+    } catch (error) {
+        console.error('Change password error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+}
 }
 
 module.exports = new AuthController();
