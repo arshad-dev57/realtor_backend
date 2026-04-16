@@ -7,7 +7,150 @@ const nodemailer = require('nodemailer');
 
 class AuthController {
 
-    // STEP 1: Forgot Password - Send OTP to email
+    // ==================== ADMIN SPECIFIC FUNCTIONS ====================
+    
+    // Admin Register - Direct admin create (No role selection needed)
+    async adminRegister(req, res) {
+        try {
+            const { name, email, phone, password, secretKey } = req.body;
+            
+            // Secret key verification for security
+            const ADMIN_SECRET_KEY = process.env.ADMIN_SECRET_KEY || 'elitecrm_admin_2024';
+            
+            if (secretKey !== ADMIN_SECRET_KEY) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Invalid secret key'
+                });
+            }
+            
+            if (!name || !email || !phone || !password) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Name, email, phone and password are required'
+                });
+            }
+            
+            const existingUser = await User.findOne({ 
+                $or: [{ email }, { phone }] 
+            });
+            
+            if (existingUser) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'User already exists with this email or phone'
+                });
+            }
+            
+            const user = new User({
+                name,
+                email,
+                phone,
+                password,
+                role: 'admin',
+                isProfileComplete: true,
+                isSubscribed: true
+            });
+            
+            await user.save();
+            
+            const token = jwt.sign(
+                { 
+                    userId: user._id, 
+                    email: user.email,
+                    name: user.name,
+                    role: 'admin'
+                },
+                process.env.JWT_SECRET || 'your_secret_key_here',
+                { expiresIn: '7d' }
+            );
+            
+            res.status(201).json({
+                success: true,
+                message: 'Admin registered successfully',
+                token: token,
+                data: {
+                    userId: user._id,
+                    name: user.name,
+                    email: user.email,
+                    phone: user.phone,
+                    role: 'admin',
+                    isProfileComplete: true,
+                    isAdmin: true
+                }
+            });
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+    
+    // Admin Login - Separate login for admin
+    async adminLogin(req, res) {
+        try {
+            const { email, password } = req.body;
+            
+            if (!email || !password) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Email and password are required'
+                });
+            }
+            
+            const user = await User.findOne({ email, role: 'admin' }).select('+password');
+            
+            if (!user) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Invalid admin credentials'
+                });
+            }
+            
+            const isPasswordValid = await user.comparePassword(password);
+            if (!isPasswordValid) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Invalid admin credentials'
+                });
+            }
+            
+            const token = jwt.sign(
+                { 
+                    userId: user._id, 
+                    email: user.email,
+                    name: user.name,
+                    role: 'admin'
+                },
+                process.env.JWT_SECRET || 'your_secret_key',
+                { expiresIn: '7d' }
+            );
+            
+            res.status(200).json({
+                success: true,
+                message: 'Admin login successful',
+                token: token,
+                data: {
+                    userId: user._id,
+                    name: user.name,
+                    email: user.email,
+                    phone: user.phone,
+                    role: 'admin',
+                    isProfileComplete: true,
+                    isAdmin: true
+                }
+            });
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
+
+    // ==================== FORGOT PASSWORD ====================
+    
     async forgotPassword(req, res) {
         try {
             const { email } = req.body;
@@ -62,7 +205,6 @@ class AuthController {
         }
     }
 
-    // STEP 2: Verify OTP (FIXED)
     async verifyOTP(req, res) {
         try {
             const { email, otp } = req.body;
@@ -74,7 +216,6 @@ class AuthController {
                 });
             }
             
-            // Find valid OTP
             const otpRecord = await OTP.findOne({
                 email: email,
                 otp: otp,
@@ -90,20 +231,11 @@ class AuthController {
                 });
             }
             
-            // Mark OTP as used
             otpRecord.isUsed = true;
             await otpRecord.save();
             
-            // Generate temporary reset token
             const resetToken = crypto.randomBytes(32).toString('hex');
             
-            console.log('=========================================');
-            console.log('VERIFY OTP - Generating Reset Token');
-            console.log('Email:', email);
-            console.log('Reset Token:', resetToken);
-            console.log('=========================================');
-            
-            // ✅ FIX: Update user with reset token
             const user = await User.findOneAndUpdate(
                 { email: email },
                 { 
@@ -119,10 +251,6 @@ class AuthController {
                     message: 'User not found'
                 });
             }
-            
-            console.log('✅ User updated with reset token');
-            console.log('Stored Token:', user.resetPasswordToken);
-            console.log('Stored Expiry:', user.resetPasswordExpires);
             
             res.status(200).json({
                 success: true,
@@ -141,16 +269,9 @@ class AuthController {
         }
     }
 
-    // STEP 3: Reset Password (FIXED)
     async resetPassword(req, res) {
         try {
             const { email, resetToken, newPassword, confirmPassword } = req.body;
-            
-            console.log('=========================================');
-            console.log('RESET PASSWORD REQUEST');
-            console.log('Email:', email);
-            console.log('Reset Token:', resetToken);
-            console.log('=========================================');
             
             if (!email || !resetToken || !newPassword || !confirmPassword) {
                 return res.status(400).json({
@@ -173,20 +294,11 @@ class AuthController {
                 });
             }
             
-            // Find user with valid reset token
             const user = await User.findOne({
                 email: email,
                 resetPasswordToken: resetToken,
                 resetPasswordExpires: { $gt: new Date() }
             });
-            
-            console.log('User found:', user ? 'YES' : 'NO');
-            if (user) {
-                console.log('User Email:', user.email);
-                console.log('Stored Token:', user.resetPasswordToken);
-                console.log('Stored Expiry:', user.resetPasswordExpires);
-                console.log('Current Time:', new Date());
-            }
             
             if (!user) {
                 return res.status(400).json({
@@ -195,15 +307,11 @@ class AuthController {
                 });
             }
             
-            // Update password
             user.password = newPassword;
             user.resetPasswordToken = undefined;
             user.resetPasswordExpires = undefined;
             await user.save();
             
-            console.log('✅ Password reset successful for:', email);
-            
-            // Delete all OTPs for this email
             await OTP.deleteMany({ email, purpose: 'password_reset' });
             
             res.status(200).json({
@@ -219,10 +327,8 @@ class AuthController {
         }
     }
 
-
-
-
-    // STEP 1: Initial Signup
+    // ==================== USER SIGNUP (Buyer/Realtor) ====================
+    
     async signup(req, res) {
         try {
             const { name, email, phone, password } = req.body;
@@ -288,7 +394,6 @@ class AuthController {
         }
     }
     
-    // STEP 2: Select Role
     async selectRole(req, res) {
         try {
             const { userId, role } = req.body;
@@ -354,7 +459,6 @@ class AuthController {
         }
     }
     
-    // STEP 3a: Complete Buyer Profile
     async completeBuyerProfile(req, res) {
         try {
             const { userId } = req.params;
@@ -401,7 +505,6 @@ class AuthController {
         }
     }
     
-    // STEP 3b: Complete Realtor Profile
     async completeRealtorProfile(req, res) {
         try {
             const { userId } = req.params;
@@ -472,8 +575,9 @@ class AuthController {
             });
         }
     }
+
+    // ==================== USER LOGIN (Buyer/Realtor) ====================
     
-    // Login
     async login(req, res) {
         try {
             const { email, password } = req.body;
@@ -485,7 +589,7 @@ class AuthController {
                 });
             }
             
-            const user = await User.findOne({ email }).select('+password');
+            const user = await User.findOne({ email, role: { $ne: 'admin' } }).select('+password');
             if (!user) {
                 return res.status(401).json({
                     success: false,
@@ -499,6 +603,11 @@ class AuthController {
                     success: false,
                     message: 'Invalid credentials'
                 });
+            }
+            
+            let requiresPayment = false;
+            if (user.role !== 'admin') {
+                requiresPayment = !user.isSubscribed && user.paymentStatus !== 'completed';
             }
             
             const token = jwt.sign(
@@ -522,7 +631,10 @@ class AuthController {
                     email: user.email,
                     phone: user.phone,
                     role: user.role,
-                    isProfileComplete: user.isProfileComplete
+                    isProfileComplete: user.isProfileComplete,
+                    requiresPayment: requiresPayment,
+                    isSubscribed: user.isSubscribed,
+                    isAdmin: false
                 }
             });
         } catch (error) {
@@ -533,7 +645,8 @@ class AuthController {
         }
     }
 
-    // Get user status
+    // ==================== USER PROFILE FUNCTIONS ====================
+    
     async getUserStatus(req, res) {
         try {
             const { userId } = req.params;
@@ -581,178 +694,159 @@ class AuthController {
         }
     }
 
-    // Add this method to your AuthController class
-
-// Get User Profile (Complete profile data)
-async getProfile(req, res) {
-    try {
-        const userId = req.user.userId; // From auth middleware
-        
-        const user = await User.findById(userId);
-        
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            });
-        }
-        
-        // Prepare response based on role
-        const profileData = {
-            id: user._id,
-            name: user.name,
-            email: user.email,
-            phone: user.phone,
-            role: user.role,
-            isProfileComplete: user.isProfileComplete,
-            profilePhoto: user.profilePhoto || null,
-            createdAt: user.createdAt,
-            updatedAt: user.updatedAt
-        };
-        
-        // Add buyer specific fields
-        if (user.role === 'buyer') {
-            profileData.preferences = user.preferences || [];
-        }
-        
-        // Add realtor specific fields
-        if (user.role === 'realtor') {
-            profileData.agencyName = user.agencyName || null;
-            profileData.licenseNumber = user.licenseNumber || null;
-            profileData.yearsOfExperience = user.yearsOfExperience || null;
-            profileData.bio = user.bio || null;
-            profileData.serviceCountry = user.serviceCountry || null;
-            profileData.serviceCity = user.serviceCity || null;
-            profileData.totalProperties = user.totalProperties || 0;
-            profileData.totalSales = user.totalSales || 0;
-            profileData.rating = user.rating || 0;
-            profileData.reviewCount = user.reviewCount || 0;
-        }
-        
-        console.log(`📋 Profile fetched for user: ${user.email} (${user.role})`);
-        
-        res.status(200).json({
-            success: true,
-            data: profileData
-        });
-    } catch (error) {
-        console.error('Get profile error:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-}
-
-// Update User Profile (Partial update)
-async updateProfile(req, res) {
-    try {
-        const userId = req.user.userId;
-        const updates = req.body;
-        
-        // Allowed fields to update
-        const allowedUpdates = [
-            'name', 'phone', 'profilePhoto', 'bio',
-            'preferences', 'agencyName', 'serviceCountry', 'serviceCity'
-        ];
-        
-        const updateData = {};
-        for (const key of allowedUpdates) {
-            if (updates[key] !== undefined) {
-                updateData[key] = updates[key];
+    async getProfile(req, res) {
+        try {
+            const userId = req.user.userId;
+            
+            const user = await User.findById(userId);
+            
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found'
+                });
             }
-        }
-        
-        const user = await User.findByIdAndUpdate(
-            userId,
-            updateData,
-            { new: true, runValidators: true }
-        );
-        
-        if (!user) {
-            return res.status(404).json({
+            
+            const profileData = {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                phone: user.phone,
+                role: user.role,
+                isProfileComplete: user.isProfileComplete,
+                profilePhoto: user.profilePhoto || null,
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt
+            };
+            
+            if (user.role === 'buyer') {
+                profileData.preferences = user.preferences || [];
+            }
+            
+            if (user.role === 'realtor') {
+                profileData.agencyName = user.agencyName || null;
+                profileData.licenseNumber = user.licenseNumber || null;
+                profileData.yearsOfExperience = user.yearsOfExperience || null;
+                profileData.bio = user.bio || null;
+                profileData.serviceCountry = user.serviceCountry || null;
+                profileData.serviceCity = user.serviceCity || null;
+            }
+            
+            res.status(200).json({
+                success: true,
+                data: profileData
+            });
+        } catch (error) {
+            console.error('Get profile error:', error);
+            res.status(500).json({
                 success: false,
-                message: 'User not found'
+                message: error.message
             });
         }
-        
-        console.log(`✏️ Profile updated for user: ${user.email}`);
-        
-        res.status(200).json({
-            success: true,
-            message: 'Profile updated successfully',
-            data: user.toJSON()
-        });
-    } catch (error) {
-        console.error('Update profile error:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
     }
-}
 
-// Change Password
-async changePassword(req, res) {
-    try {
-        const userId = req.user.userId;
-        const { currentPassword, newPassword, confirmPassword } = req.body;
-        
-        if (!currentPassword || !newPassword || !confirmPassword) {
-            return res.status(400).json({
+    async updateProfile(req, res) {
+        try {
+            const userId = req.user.userId;
+            const updates = req.body;
+            
+            const allowedUpdates = [
+                'name', 'phone', 'profilePhoto', 'bio',
+                'preferences', 'agencyName', 'serviceCountry', 'serviceCity'
+            ];
+            
+            const updateData = {};
+            for (const key of allowedUpdates) {
+                if (updates[key] !== undefined) {
+                    updateData[key] = updates[key];
+                }
+            }
+            
+            const user = await User.findByIdAndUpdate(
+                userId,
+                updateData,
+                { new: true, runValidators: true }
+            );
+            
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found'
+                });
+            }
+            
+            res.status(200).json({
+                success: true,
+                message: 'Profile updated successfully',
+                data: user.toJSON()
+            });
+        } catch (error) {
+            console.error('Update profile error:', error);
+            res.status(500).json({
                 success: false,
-                message: 'All fields are required'
+                message: error.message
             });
         }
-        
-        if (newPassword !== confirmPassword) {
-            return res.status(400).json({
-                success: false,
-                message: 'New passwords do not match'
-            });
-        }
-        
-        if (newPassword.length < 6) {
-            return res.status(400).json({
-                success: false,
-                message: 'Password must be at least 6 characters'
-            });
-        }
-        
-        const user = await User.findById(userId).select('+password');
-        
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            });
-        }
-        
-        const isPasswordValid = await user.comparePassword(currentPassword);
-        if (!isPasswordValid) {
-            return res.status(401).json({
-                success: false,
-                message: 'Current password is incorrect'
-            });
-        }
-        
-        user.password = newPassword;
-        await user.save();
-        
-        console.log(`🔐 Password changed for user: ${user.email}`);
-        
-        res.status(200).json({
-            success: true,
-            message: 'Password changed successfully'
-        });
-    } catch (error) {
-        console.error('Change password error:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
     }
-}
+
+    async changePassword(req, res) {
+        try {
+            const userId = req.user.userId;
+            const { currentPassword, newPassword, confirmPassword } = req.body;
+            
+            if (!currentPassword || !newPassword || !confirmPassword) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'All fields are required'
+                });
+            }
+            
+            if (newPassword !== confirmPassword) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'New passwords do not match'
+                });
+            }
+            
+            if (newPassword.length < 6) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Password must be at least 6 characters'
+                });
+            }
+            
+            const user = await User.findById(userId).select('+password');
+            
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found'
+                });
+            }
+            
+            const isPasswordValid = await user.comparePassword(currentPassword);
+            if (!isPasswordValid) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Current password is incorrect'
+                });
+            }
+            
+            user.password = newPassword;
+            await user.save();
+            
+            res.status(200).json({
+                success: true,
+                message: 'Password changed successfully'
+            });
+        } catch (error) {
+            console.error('Change password error:', error);
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    }
 }
 
 module.exports = new AuthController();

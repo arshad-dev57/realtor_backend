@@ -604,121 +604,156 @@ async getPropertyById(req, res) {
     }
 
     // ==================== GET ALL PROPERTIES (PUBLIC) ====================
+    // ==================== GET ALL PROPERTIES (PUBLIC) ====================
+
+async getAllProperties(req, res) {
+    console.log('\n========== GET ALL PROPERTIES START ==========');
     
-    async getAllProperties(req, res) {
-        console.log('\n========== GET ALL PROPERTIES START ==========');
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const skip = (page - 1) * limit;
         
-        try {
-            const page = parseInt(req.query.page) || 1;
-            const limit = parseInt(req.query.limit) || 20;
-            const skip = (page - 1) * limit;
-            
-            console.log(`📄 Pagination: page=${page}, limit=${limit}, skip=${skip}`);
-            
-            const query = { isActive: true };
-            
-            // Apply filters
-            if (req.query.listingType) {
-                query.listingType = req.query.listingType;
-                console.log(`🔍 Filter by listingType: ${req.query.listingType}`);
-            }
-            if (req.query.propertyType) {
-                query.propertyType = req.query.propertyType;
-                console.log(`🔍 Filter by propertyType: ${req.query.propertyType}`);
-            }
-            if (req.query.city) {
-                query.city = req.query.city;
-                console.log(`🔍 Filter by city: ${req.query.city}`);
-            }
-            
-            // Price filter
-            if (req.query.minPrice || req.query.maxPrice) {
-                query.$or = [
-                    { salePrice: {} },
-                    { rentMinPrice: {} },
-                    { commercialPrice: {} }
-                ];
-                if (req.query.minPrice) {
-                    const minPrice = parseInt(req.query.minPrice);
-                    query.$or.forEach(q => {
-                        if (q.salePrice) q.salePrice.$gte = minPrice;
-                        if (q.rentMinPrice) q.rentMinPrice.$gte = minPrice;
-                        if (q.commercialPrice) q.commercialPrice.$gte = minPrice;
-                    });
-                    console.log(`🔍 Min Price: ${minPrice}`);
-                }
-                if (req.query.maxPrice) {
-                    const maxPrice = parseInt(req.query.maxPrice);
-                    query.$or.forEach(q => {
-                        if (q.salePrice) q.salePrice.$lte = maxPrice;
-                        if (q.rentMaxPrice) q.rentMaxPrice.$lte = maxPrice;
-                        if (q.commercialPrice) q.commercialPrice.$lte = maxPrice;
-                    });
-                    console.log(`🔍 Max Price: ${maxPrice}`);
-                }
-            }
-            
-            if (req.query.bedrooms && req.query.bedrooms !== 'No min') {
-                query.bedrooms = req.query.bedrooms;
-                console.log(`🔍 Bedrooms: ${req.query.bedrooms}`);
-            }
-            if (req.query.bathrooms && req.query.bathrooms !== 'No min') {
-                query.bathrooms = req.query.bathrooms;
-                console.log(`🔍 Bathrooms: ${req.query.bathrooms}`);
-            }
-            
-            // Search
-            if (req.query.search) {
-                query.$or = [
-                    { propertyTitle: { $regex: req.query.search, $options: 'i' } },
-                    { address: { $regex: req.query.search, $options: 'i' } },
-                    { city: { $regex: req.query.search, $options: 'i' } }
-                ];
-                console.log(`🔍 Search: ${req.query.search}`);
-            }
-            
-            console.log(`📊 Query:`, JSON.stringify(query, null, 2));
-            
-            const total = await Property.countDocuments(query);
-            console.log(`📈 Total properties: ${total}`);
-            
-            const properties = await Property.find(query)
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limit);
-            
-            console.log(`📋 Retrieved ${properties.length} properties`);
-            
-            const pagination = {
-                currentPage: page,
-                totalPages: Math.ceil(total / limit),
-                totalItems: total,
-                itemsPerPage: limit,
-                hasNext: page < Math.ceil(total / limit),
-                hasPrev: page > 1
-            };
-            
-            console.log('========== GET ALL PROPERTIES SUCCESS ==========\n');
-            
-            res.status(200).json({
-                success: true,
-                data: {
-                    properties,
-                    pagination
-                }
-            });
-        } catch (error) {
-            console.error('\n❌ ========== GET ALL PROPERTIES ERROR ==========');
-            console.error('Error message:', error.message);
-            console.error('Error stack:', error.stack);
-            console.error('================================================\n');
-            
-            res.status(500).json({
-                success: false,
-                message: error.message
-            });
+        console.log(`📄 Pagination: page=${page}, limit=${limit}, skip=${skip}`);
+        
+        // ✅ FIX: Remove isActive filter - it doesn't exist in schema
+        const query = {};  // Empty query to get all properties
+        
+        // Apply filters
+        if (req.query.listingType && req.query.listingType !== 'All') {
+            query.type = req.query.listingType;
+            console.log(`🔍 Filter by type: ${req.query.listingType}`);
         }
+        
+        if (req.query.propertyType && req.query.propertyType !== 'All') {
+            query.propertyType = req.query.propertyType;
+            console.log(`🔍 Filter by propertyType: ${req.query.propertyType}`);
+        }
+        
+        if (req.query.city && req.query.city !== 'All') {
+            query['location.city'] = { $regex: new RegExp(req.query.city, 'i') };
+            console.log(`🔍 Filter by city: ${req.query.city}`);
+        }
+        
+        if (req.query.status && req.query.status !== 'All') {
+            query.status = req.query.status;
+            console.log(`🔍 Filter by status: ${req.query.status}`);
+        }
+        
+        // Price filter
+        if (req.query.minPrice || req.query.maxPrice) {
+            query.price = {};
+            if (req.query.minPrice && req.query.minPrice !== 'No min') {
+                query.price.$gte = parseInt(req.query.minPrice);
+            }
+            if (req.query.maxPrice && req.query.maxPrice !== 'No max') {
+                query.price.$lte = parseInt(req.query.maxPrice);
+            }
+            console.log(`🔍 Price range: ${query.price.$gte || 'any'} - ${query.price.$lte || 'any'}`);
+        }
+        
+        // Bedrooms filter
+        if (req.query.bedrooms && req.query.bedrooms !== 'All' && req.query.bedrooms !== 'No min') {
+            query.bedrooms = { $gte: parseInt(req.query.bedrooms) };
+            console.log(`🔍 Bedrooms: ${req.query.bedrooms}+`);
+        }
+        
+        // Bathrooms filter
+        if (req.query.bathrooms && req.query.bathrooms !== 'All' && req.query.bathrooms !== 'No min') {
+            query.bathrooms = { $gte: parseInt(req.query.bathrooms) };
+            console.log(`🔍 Bathrooms: ${req.query.bathrooms}+`);
+        }
+        
+        // Search
+        if (req.query.search && req.query.search.trim()) {
+            const searchRegex = new RegExp(req.query.search, 'i');
+            query.$or = [
+                { title: searchRegex },
+                { 'location.address': searchRegex },
+                { 'location.city': searchRegex },
+                { 'location.state': searchRegex }
+            ];
+            console.log(`🔍 Search: ${req.query.search}`);
+        }
+        
+        console.log(`📊 Final Query:`, JSON.stringify(query, null, 2));
+        
+        const total = await Property.countDocuments(query);
+        console.log(`📈 Total properties: ${total}`);
+        
+        const properties = await Property.find(query)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .populate('realtorId', 'name email');
+        
+        console.log(`📋 Retrieved ${properties.length} properties`);
+        
+        // Format response for frontend
+        const formattedProperties = properties.map(prop => ({
+            _id: prop._id,
+            title: prop.title,
+            propertyTitle: prop.title,
+            description: prop.description,
+            type: prop.type,
+            listingType: prop.type,
+            priceDisplay: prop.priceDisplay,
+            price: prop.price,
+            location: prop.location ? `${prop.location.city || ''}, ${prop.location.state || ''}` : '',
+            city: prop.location?.city || '',
+            state: prop.location?.state || '',
+            address: prop.location?.address || '',
+            bedrooms: prop.bedrooms || 0,
+            bathrooms: prop.bathrooms || 0,
+            squareFeet: prop.area?.value || 0,
+            area: prop.area?.display || '0 sqft',
+            parking: prop.parking || 0,
+            garageSpaces: prop.garageSpaces || 0,
+            imageUrl: prop.imageUrl || '',
+            mainImage: prop.imageUrl || '',
+            images: prop.images || [],
+            status: prop.status || 'available',
+            isNew: prop.isNew || false,
+            isFeatured: prop.isFeatured || false,
+            createdAt: prop.createdAt,
+            views: prop.views || 0,
+            inquiries: prop.inquiries || 0,
+            features: prop.features || [],
+            amenities: prop.amenities || {},
+            realtorName: prop.realtorId?.name || 'Unknown',
+            realtorEmail: prop.realtorId?.email || ''
+        }));
+        
+        const pagination = {
+            currentPage: page,
+            totalPages: Math.ceil(total / limit),
+            totalItems: total,
+            itemsPerPage: limit,
+            hasNext: page < Math.ceil(total / limit),
+            hasPrev: page > 1
+        };
+        
+        console.log('========== GET ALL PROPERTIES SUCCESS ==========\n');
+        
+        res.status(200).json({
+            success: true,
+            data: {
+                properties: formattedProperties,
+                pagination
+            }
+        });
+    } catch (error) {
+        console.error('\n❌ ========== GET ALL PROPERTIES ERROR ==========');
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        console.error('================================================\n');
+        
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
+}
 async getPropertiesByCity(req, res) {
     try {
         const { city } = req.params;

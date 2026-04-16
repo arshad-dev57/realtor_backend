@@ -8,6 +8,40 @@ const userSchema = new mongoose.Schema({
         required: [true, 'Name is required'],
         trim: true
     },
+    isSubscribed: {
+        type: Boolean,
+        default: false
+    },
+    subscriptionId: {
+        type: String,
+        default: null
+    },
+    subscriptionDate: {
+        type: Date,
+        default: null
+    },
+    subscriptionExpiryDate: {
+        type: Date,
+        default: null
+    },
+    paymentStatus: {
+        type: String,
+        enum: ['pending', 'completed', 'failed', 'refunded'],
+        default: 'pending'
+    },
+    paymentAmount: {
+        type: Number,
+        default: 100
+    },
+    paymentMethod: {
+        type: String,
+        default: null
+    },
+    transactionId: {
+        type: String,
+        default: null
+    },
+
     email: {
         type: String,
         required: [true, 'Email is required'],
@@ -26,10 +60,10 @@ const userSchema = new mongoose.Schema({
         select: false
     },
     
-    // Step 2 - Role
+    // Step 2 - Role (UPDATED: 'admin' added)
     role: {
         type: String,
-        enum: ['buyer', 'realtor', null],
+        enum: ['buyer', 'realtor', 'admin', null],  // ✅ 'admin' added
         default: null
     },
     
@@ -44,17 +78,16 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: null
     },
-    // In models/user.model.js - Add these fields
-resetPasswordToken: {
-    type: String,
-    default: null,
-    index: true
-},
-resetPasswordExpires: {
-    type: Date,
-    default: null
-},
-
+    
+    resetPasswordToken: {
+        type: String,
+        default: null,
+        index: true
+    },
+    resetPasswordExpires: {
+        type: Date,
+        default: null
+    },
 
     // Realtor Specific Fields
     agencyName: String,
@@ -80,7 +113,7 @@ resetPasswordExpires: {
 
 // Hash password
 userSchema.pre('save', async function() {
-    if (!this.isModified('password')) return ;
+    if (!this.isModified('password')) return;
     
     try {
         const salt = await bcrypt.genSalt(10);

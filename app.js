@@ -64,7 +64,10 @@ class App {
 this.app.use('/api/v1/dashboard', require('./routes/dashboard.routes'));    
         // ✅ Tour routes - YAHAN ADD KARO
         this.app.use('/api/v1/tours', require('./routes/tour.routes'));
+// Add this line in your main server file
 
+this.app.use('/api/v1/users',require('./routes/user.routes') );
+// Use routes
         // 404 handler
         this.app.use((req, res) => {
             res.status(404).json({
