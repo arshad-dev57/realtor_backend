@@ -1,5 +1,6 @@
 const LeadRequest = require('../models/leadRequest.model');
 const Lead = require('../models/lead.model');
+
 const User = require('../models/user.model');
 
 class LeadRequestController {
