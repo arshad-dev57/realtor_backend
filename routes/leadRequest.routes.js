@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const LeadRequestController = require('../controllers/leadRequest.controller');
+const LeadRequestController = require('../controllers/leadrequest.controller');
 const { protect } = require('../middlewares/auth.middleware');
 
 // ==================== REALTOR ROUTES ====================
