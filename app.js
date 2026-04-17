@@ -54,19 +54,13 @@ class App {
         
         // Auth routes
         this.app.use('/api/v1/auth', require('./routes/auth.routes'));
-        
-        // Property routes
         this.app.use('/api/v1/property', require('./routes/property.routes'));
-        
-        // Contact/Email routes
         this.app.use('/api/v1/contact', require('./routes/email.routes'));
-        // In your App.js, add this line with other routes
-this.app.use('/api/v1/dashboard', require('./routes/dashboard.routes'));    
-        // ✅ Tour routes - YAHAN ADD KARO
+        this.app.use('/api/v1/dashboard', require('./routes/dashboard.routes'));    
         this.app.use('/api/v1/tours', require('./routes/tour.routes'));
-// Add this line in your main server file
-
-this.app.use('/api/v1/users',require('./routes/user.routes') );
+        this.app.use('/api/v1/users',require('./routes/user.routes') );
+        this.app.use('/api/v1/leads',require('./routes/lead.routes') );
+        this.app.use('/api/v1/lead-requests',require('./routes/leadRequest.routes'));
 // Use routes
         // 404 handler
         this.app.use((req, res) => {

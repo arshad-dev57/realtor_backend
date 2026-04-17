@@ -1,11 +1,13 @@
 const router = require('express').Router();
 const AuthController = require('../controllers/auth.controller');
+const Subscription = require('../controllers/subscription.controller');
 const { protect } = require('../middlewares/auth.middleware');
 
 // ==================== ADMIN ROUTES (No role selection needed) ====================
 router.post('/admin/register', AuthController.adminRegister);
 router.post('/admin/login', AuthController.adminLogin);
-
+router.post('/subscription/create',protect,Subscription.createSubscription);
+router.get('/subscription/check', Subscription.checkSubscription);
 // ==================== USER ROUTES (Buyer/Realtor) ====================
 router.post('/signup', AuthController.signup);
 router.post('/login', AuthController.login);
