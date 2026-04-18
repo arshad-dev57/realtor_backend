@@ -1,4 +1,7 @@
 const User = require('../models/user.model');
+
+const { sendToUser } = require("../services/onesignal");
+
 const OTP = require('../models/otp.model');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -577,74 +580,103 @@ class AuthController {
     }
 
     // ==================== USER LOGIN (Buyer/Realtor) ====================
-    
-    async login(req, res) {
-        try {
-            const { email, password } = req.body;
-            
-            if (!email || !password) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Email and password are required'
-                });
-            }
-            
-            const user = await User.findOne({ email, role: { $ne: 'admin' } }).select('+password');
-            if (!user) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Invalid credentials'
-                });
-            }
-            
-            const isPasswordValid = await user.comparePassword(password);
-            if (!isPasswordValid) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Invalid credentials'
-                });
-            }
-            
-            let requiresPayment = false;
-            if (user.role !== 'admin') {
-                requiresPayment = !user.isSubscribed && user.paymentStatus !== 'completed';
-            }
-            
-            const token = jwt.sign(
-                { 
-                    userId: user._id, 
-                    email: user.email,
-                    name: user.name,
-                    role: user.role
-                },
-                process.env.JWT_SECRET || 'your_secret_key',
-                { expiresIn: '7d' }
-            );
-            
-            res.status(200).json({
-                success: true,
-                message: 'Login successful',
-                token: token,
-                data: {
-                    userId: user._id,
-                    name: user.name,
-                    email: user.email,
-                    phone: user.phone,
-                    role: user.role,
-                    isProfileComplete: user.isProfileComplete,
-                    requiresPayment: requiresPayment,
-                    isSubscribed: user.isSubscribed,
-                    isAdmin: false
-                }
-            });
-        } catch (error) {
-            res.status(400).json({
-                success: false,
-                message: error.message
-            });
-        }
+    // authController.js
+
+
+async login(req, res) {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and password are required'
+      });
     }
 
+    const user = await User.findOne({
+      email,
+      role: { $ne: 'admin' }
+    }).select('+password');
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    const isPasswordValid = await user.comparePassword(password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    let requiresPayment = false;
+
+    if (user.role !== 'admin') {
+      requiresPayment =
+        !user.isSubscribed &&
+        user.paymentStatus !== 'completed';
+    }
+
+    const token = jwt.sign(
+      {
+        userId: user._id,
+        email: user.email,
+        name: user.name,
+        role: user.role
+      },
+      process.env.JWT_SECRET || 'your_secret_key',
+      { expiresIn: '7d' }
+    );
+
+    /// ===============================
+    /// LOGIN SUCCESS PUSH NOTIFICATION
+    /// ===============================
+    try {
+      await sendToUser({
+        mongoUserId: user._id.toString(),
+        title: "Login Successful",
+        message: `Welcome back ${user.name} 🎉`,
+        data: {
+          type: "login_success",
+          screen: "home"
+        }
+      });
+
+      console.log("✅ Login notification sent");
+    } catch (pushErr) {
+      console.log("❌ Push send failed:", pushErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Login successful',
+      token: token,
+      data: {
+        userId: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        isProfileComplete: user.isProfileComplete,
+        requiresPayment: requiresPayment,
+        isSubscribed: user.isSubscribed,
+        isAdmin: false
+      }
+    });
+
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+}
     // ==================== USER PROFILE FUNCTIONS ====================
     
     async getUserStatus(req, res) {
