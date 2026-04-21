@@ -69,8 +69,10 @@ class App {
         this.app.use('/api/v1/users', require('./routes/user.routes'));
         this.app.use('/api/v1/leads', require('./routes/lead.routes'));
         this.app.use('/api/v1/lead-requests', require('./routes/leadRequest.routes'));
-      this.app.use('/api/v1/notification', require('./routes/notification.routes'));
+      this.app.use('/api/v1/notifications', require('./routes/notification.routes'));
+    this.app.use('/api/v1/admindashboard', require('./routes/admin.dashboard.routes'));
 
+this.app.use('/api/v1/payments', require('./routes/payment.routes'));
         // 404 handler
         this.app.use((req, res) => {
             res.status(404).json({

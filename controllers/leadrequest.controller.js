@@ -1,7 +1,9 @@
+// backend/controllers/leadRequest.controller.js
+
 const LeadRequest = require('../models/leadRequest.model');
 const Lead = require('../models/lead.model');
-
 const User = require('../models/user.model');
+const NotificationController = require('./notification.controller');
 
 class LeadRequestController {
     
@@ -48,6 +50,16 @@ class LeadRequestController {
             });
             
             await request.save();
+            
+            // ✅ Send notification to admin about new lead request
+            await NotificationController.sendNewLeadRequestNotificationToAdmin({
+                _id: request._id,
+                realtorName: user.name,
+                realtorEmail: user.email,
+                requestedLeadsCount: request.requestedLeadsCount || 'Not specified',
+                country: country,
+                city: city
+            });
             
             res.status(201).json({
                 success: true,
@@ -197,6 +209,7 @@ class LeadRequestController {
             }
             
             // Assign leads to realtor
+            const assignedLeadIds = [];
             if (leadIds && leadIds.length > 0) {
                 await Lead.updateMany(
                     { _id: { $in: leadIds } },
@@ -209,6 +222,7 @@ class LeadRequestController {
                         country: request.country
                     }
                 );
+                assignedLeadIds.push(...leadIds);
                 request.assignedLeads = leadIds;
             }
             
@@ -216,12 +230,38 @@ class LeadRequestController {
             request.reviewedBy = req.user.userId;
             request.reviewedAt = new Date();
             request.adminRejectionReason = null;
+            request.adminNote = adminNote;
             
             await request.save();
             
+            // ✅ Send notification to realtor that request is approved
+            await NotificationController.sendLeadRequestApprovedNotification(
+                request.realtorId,
+                {
+                    _id: request._id,
+                    leadsCount: assignedLeadIds.length
+                }
+            );
+            
+            // ✅ Send notifications for each assigned lead
+            for (const leadId of assignedLeadIds) {
+                const lead = await Lead.findById(leadId);
+                if (lead) {
+                    await NotificationController.sendLeadAssignedNotification(
+                        request.realtorId,
+                        {
+                            _id: lead._id,
+                            name: lead.name,
+                            email: lead.email,
+                            propertyInterest: lead.propertyInterest
+                        }
+                    );
+                }
+            }
+            
             res.status(200).json({
                 success: true,
-                message: `Request approved. ${leadIds?.length || 0} leads assigned.`,
+                message: `Request approved. ${assignedLeadIds.length} leads assigned.`,
                 data: request
             });
         } catch (error) {
@@ -267,6 +307,12 @@ class LeadRequestController {
             request.reviewedAt = new Date();
             
             await request.save();
+            
+            // ✅ Send notification to realtor that request is rejected
+            await NotificationController.sendLeadRequestRejectedNotification(
+                request.realtorId,
+                rejectionReason
+            );
             
             res.status(200).json({
                 success: true,

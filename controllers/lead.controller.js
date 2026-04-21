@@ -1,5 +1,8 @@
+// backend/controllers/lead.controller.js
+
 const Lead = require('../models/lead.model');
 const User = require('../models/user.model');
+const NotificationController = require('./notification.controller');
 
 class LeadController {
     
@@ -21,7 +24,6 @@ class LeadController {
                 });
             }
             
-            // Calculate score
             let leadData = {
                 name, email, phone, propertyType, budget, budgetMin, budgetMax,
                 location, source, status, priority, stage, notes,
@@ -29,12 +31,13 @@ class LeadController {
                 score: 50
             };
             
-            // Assign to realtor if specified
+            let assignedRealtor = null;
             if (assignedTo) {
                 const assignedUser = await User.findById(assignedTo);
                 if (assignedUser && assignedUser.role === 'realtor') {
                     leadData.assignedTo = assignedTo;
                     leadData.assignedToName = assignedUser.name;
+                    assignedRealtor = assignedUser;
                 }
             }
             
@@ -42,9 +45,22 @@ class LeadController {
             lead.calculateScore();
             await lead.save();
             
-            // Populate assignedTo details
             await lead.populate('assignedTo', 'name email');
             await lead.populate('createdBy', 'name email');
+            
+            // ✅ Send notification if lead is assigned to a realtor
+            if (assignedRealtor) {
+                await NotificationController.sendLeadAssignedNotification(
+                    assignedRealtor._id,
+                    {
+                        _id: lead._id,
+                        name: lead.name,
+                        email: lead.email,
+                        phone: lead.phone,
+                        propertyInterest: lead.propertyType || 'Not specified'
+                    }
+                );
+            }
             
             res.status(201).json({
                 success: true,
@@ -78,7 +94,6 @@ class LeadController {
             
             const query = { isActive: true };
             
-            // Search filter
             if (search) {
                 query.$or = [
                     { name: { $regex: search, $options: 'i' } },
@@ -88,7 +103,6 @@ class LeadController {
                 ];
             }
             
-            // Filters
             if (source && source !== 'All') query.source = source;
             if (status && status !== 'All') query.status = status;
             if (stage && stage !== 'All') query.stage = stage;
@@ -107,7 +121,6 @@ class LeadController {
             
             const total = await Lead.countDocuments(query);
             
-            // Calculate stats
             const hotLeads = await Lead.countDocuments({ ...query, status: 'Hot' });
             const warmLeads = await Lead.countDocuments({ ...query, status: 'Warm' });
             const closedWon = await Lead.countDocuments({ ...query, stage: 'Closed Won' });
@@ -149,11 +162,9 @@ class LeadController {
             
             let query = { isActive: true };
             
-            // If realtor, show only assigned leads
             if (user.role === 'realtor') {
                 query.assignedTo = userId;
             }
-            // If admin, show all leads (no filter)
             
             const leads = await Lead.find(query)
                 .populate('assignedTo', 'name email')
@@ -234,27 +245,75 @@ class LeadController {
                 });
             }
             
-            // Update fields
+            const oldStage = lead.stage;
+            const oldStatus = lead.status;
+            
             Object.keys(updates).forEach(key => {
                 if (key !== '_id' && key !== '__v') {
                     lead[key] = updates[key];
                 }
             });
             
-            // Recalculate score
             lead.calculateScore();
             
-            // If assignedTo changed, update assignedToName
-            if (updates.assignedTo && updates.assignedTo !== lead.assignedTo) {
+            let assignedRealtor = null;
+            if (updates.assignedTo && updates.assignedTo !== lead.assignedTo?.toString()) {
                 const assignedUser = await User.findById(updates.assignedTo);
                 if (assignedUser) {
                     lead.assignedToName = assignedUser.name;
+                    assignedRealtor = assignedUser;
                 }
             }
             
             await lead.save();
             await lead.populate('assignedTo', 'name email');
             await lead.populate('createdBy', 'name email');
+            
+            // ✅ Send notification if lead is assigned to a realtor (new assignment)
+            if (assignedRealtor) {
+                await NotificationController.sendLeadAssignedNotification(
+                    assignedRealtor._id,
+                    {
+                        _id: lead._id,
+                        name: lead.name,
+                        email: lead.email,
+                        phone: lead.phone,
+                        propertyInterest: lead.propertyType || 'Not specified'
+                    }
+                );
+            }
+            
+            // ✅ Send notification if stage changed (for assigned realtor)
+            if (lead.assignedTo && oldStage !== lead.stage) {
+                const realtor = await User.findById(lead.assignedTo);
+                if (realtor) {
+                    await NotificationController.sendLeadStageUpdateNotification(
+                        lead.assignedTo,
+                        {
+                            _id: lead._id,
+                            name: lead.name,
+                            oldStage: oldStage,
+                            newStage: lead.stage
+                        }
+                    );
+                }
+            }
+            
+            // ✅ Send notification if status changed
+            if (lead.assignedTo && oldStatus !== lead.status) {
+                const realtor = await User.findById(lead.assignedTo);
+                if (realtor) {
+                    await NotificationController.sendLeadStatusUpdateNotification(
+                        lead.assignedTo,
+                        {
+                            _id: lead._id,
+                            name: lead.name,
+                            oldStatus: oldStatus,
+                            newStatus: lead.status
+                        }
+                    );
+                }
+            }
             
             res.status(200).json({
                 success: true,
@@ -292,11 +351,36 @@ class LeadController {
                 });
             }
             
+            const oldRealtor = lead.assignedTo;
+            
             lead.assignedTo = realtorId;
             lead.assignedToName = realtor.name;
             lead.stage = 'Qualified';
             lead.calculateScore();
             await lead.save();
+            
+            // ✅ Send notification to new realtor
+            await NotificationController.sendLeadAssignedNotification(
+                realtorId,
+                {
+                    _id: lead._id,
+                    name: lead.name,
+                    email: lead.email,
+                    phone: lead.phone,
+                    propertyInterest: lead.propertyType || 'Not specified'
+                }
+            );
+            
+            // ✅ Send notification to old realtor if exists (lead removed)
+            if (oldRealtor) {
+                await NotificationController.sendLeadRemovedNotification(
+                    oldRealtor,
+                    {
+                        _id: lead._id,
+                        name: lead.name
+                    }
+                );
+            }
             
             res.status(200).json({
                 success: true,
@@ -334,9 +418,23 @@ class LeadController {
                 });
             }
             
+            const oldStage = lead.stage;
             lead.stage = stage;
             lead.calculateScore();
             await lead.save();
+            
+            // ✅ Send notification to assigned realtor about stage change
+            if (lead.assignedTo) {
+                await NotificationController.sendLeadStageUpdateNotification(
+                    lead.assignedTo,
+                    {
+                        _id: lead._id,
+                        name: lead.name,
+                        oldStage: oldStage,
+                        newStage: stage
+                    }
+                );
+            }
             
             res.status(200).json({
                 success: true,
@@ -357,13 +455,26 @@ class LeadController {
         try {
             const { id } = req.params;
             
-            const lead = await Lead.findByIdAndDelete(id);
+            const lead = await Lead.findById(id);
             if (!lead) {
                 return res.status(404).json({
                     success: false,
                     message: 'Lead not found'
                 });
             }
+            
+            // ✅ Send notification to assigned realtor about lead deletion
+            if (lead.assignedTo) {
+                await NotificationController.sendLeadDeletedNotification(
+                    lead.assignedTo,
+                    {
+                        _id: lead._id,
+                        name: lead.name
+                    }
+                );
+            }
+            
+            await Lead.findByIdAndDelete(id);
             
             res.status(200).json({
                 success: true,
@@ -424,4 +535,4 @@ class LeadController {
     }
 }
 
-module.exports = new LeadController();  
+module.exports = new LeadController();

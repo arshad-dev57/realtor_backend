@@ -1,7 +1,10 @@
 // backend/controllers/property.controller.js
 const Property = require('../models/property.model');
+const User = require('../models/user.model');
+const Notification = require('../models/notification.model');
 const { cloudinary } = require('../config/cloudinary.config');
-
+const { sendToUser } = require("../services/onesignal");
+const { sendEmail } = require('../services/email.service');
 
 function getTimeAgo(date) {
     if (!date) return 'Recently';
@@ -9,11 +12,9 @@ function getTimeAgo(date) {
     const past = new Date(date);
     const diffMs = now - past;
 
-    
     const diffMins = Math.floor(diffMs / (1000 * 60));
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
 
     if (diffMins < 1) return 'Just now';
     if (diffMins < 60) return `${diffMins} min ago`;
@@ -24,10 +25,8 @@ function getTimeAgo(date) {
     return `${Math.floor(diffDays / 365)} year${Math.floor(diffDays / 365) > 1 ? 's' : ''} ago`;
 }
 
-
 class PropertyController {
     
-    // ✅ CONSTRUCTOR - Bind all methods to fix 'this' issue
     constructor() {
         this.getPublicIdFromUrl = this.getPublicIdFromUrl.bind(this);
         this.deleteImage = this.deleteImage.bind(this);
@@ -40,6 +39,7 @@ class PropertyController {
         this.getAllProperties = this.getAllProperties.bind(this);
         this.getPropertiesByCity = this.getPropertiesByCity.bind(this);
         this.searchProperties = this.searchProperties.bind(this);
+        this.sendNotificationsToMatchingUsers = this.sendNotificationsToMatchingUsers.bind(this);
     }
         
     getPublicIdFromUrl(url) {
@@ -75,6 +75,91 @@ class PropertyController {
         if (!imageUrls || imageUrls.length === 0) return;
         for (const url of imageUrls) {
             await this.deleteImage(url);
+        }
+    }
+
+    async sendNotificationsToMatchingUsers(property) {
+        try {
+            const propertyCity = property.location?.city;
+            if (!propertyCity) {
+                console.log('⚠️ No city in property, skipping notifications');
+                return;
+            }
+
+            console.log(`🔍 Looking for users in city: ${propertyCity}`);
+
+            const matchingUsers = await User.find({
+                role: 'buyer',
+                city: { $regex: new RegExp(propertyCity, 'i') },
+                isProfileComplete: true
+            });
+
+            console.log(`📊 Found ${matchingUsers.length} users matching city: ${propertyCity}`);
+
+            for (const user of matchingUsers) {
+                try {
+                    await sendToUser({
+                        mongoUserId: user._id.toString(),
+                        title: "🏠 New Property Alert!",
+                        message: `A new ${property.type} property "${property.title}" is now available in ${propertyCity}!`,
+                        data: {
+                            type: "new_property_alert",
+                            screen: "property_details",
+                            propertyId: property._id.toString(),
+                            propertyTitle: property.title,
+                            propertyCity: propertyCity,
+                            propertyPrice: property.priceDisplay
+                        }
+                    });
+                    console.log(`✅ Notification sent to: ${user.email}`);
+
+                    const notification = new Notification({
+                        userId: user._id,
+                        title: "🏠 New Property Alert!",
+                        message: `A new ${property.type} property "${property.title}" is now available in ${propertyCity}!`,
+                        type: "new_property_alert",
+                        data: {
+                            propertyId: property._id.toString(),
+                            propertyTitle: property.title,
+                            propertyCity: propertyCity,
+                            propertyPrice: property.priceDisplay
+                        }
+                    });
+                    await notification.save();
+
+                    const emailBody = `
+                        <h2>🏠 New Property Alert!</h2>
+                        <p>Dear ${user.name},</p>
+                        <p>A new property matching your location has been listed:</p>
+                        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                            <h3 style="color: #3498db; margin: 0 0 10px 0;">${property.title}</h3>
+                            <p><strong>📍 Location:</strong> ${propertyCity}</p>
+                            <p><strong>💰 Price:</strong> ${property.priceDisplay}</p>
+                            <p><strong>🏷️ Type:</strong> ${property.type}</p>
+                            <p><strong>🛏️ Bedrooms:</strong> ${property.bedrooms}</p>
+                            <p><strong>🚽 Bathrooms:</strong> ${property.bathrooms}</p>
+                        </div>
+                        <br><br>
+                        <p>Best regards,<br>Elite CRM Team</p>
+                    `;
+
+                    await sendEmail({
+                        to: user.email,
+                        subject: `🏠 New Property Alert: ${property.title} in ${propertyCity}`,
+                        body: emailBody,
+                        fromEmail: process.env.EMAIL_USER,
+                        fromName: "Elite CRM System"
+                    });
+                    console.log(`✅ Email sent to: ${user.email}`);
+                } catch (userError) {
+                    console.error(`❌ Failed to send to user ${user.email}:`, userError.message);
+                }
+            }
+
+            console.log(`✅ Completed sending notifications to ${matchingUsers.length} users`);
+
+        } catch (error) {
+            console.error('❌ Error sending notifications to matching users:', error.message);
         }
     }
 
@@ -186,6 +271,8 @@ class PropertyController {
             
             console.log('========== ADD PROPERTY SUCCESS ==========');
             console.log(`✅ Property saved with location.city: ${location.city}`);
+            
+            await this.sendNotificationsToMatchingUsers(property);
             
             res.status(201).json({
                 success: true,
@@ -311,106 +398,103 @@ class PropertyController {
             });
         }
     }
-// ✅ Sirf yeh function replace karo property.controller.js mein
 
-async getPropertyById(req, res) {
-    console.log('\n========== GET PROPERTY BY ID START ==========');
-    
-    try {
-        const { propertyId } = req.params;
-        const userId = req.user?.userId;
+    async getPropertyById(req, res) {
+        console.log('\n========== GET PROPERTY BY ID START ==========');
         
-        console.log(`🔍 Property ID: ${propertyId}`);
-        console.log(`📝 User ID: ${userId || 'No auth (public)'}`);
-        
-        let query = { _id: propertyId };
-        if (userId) {
-            query = { _id: propertyId, realtorId: userId };
-        }
-        
-        // ✅ realtorId se name aur email dono populate karo
-        const property = await Property.findOne(query)
-            .populate('realtorId', 'name email');
-        
-        if (!property) {
-            console.log(`❌ Property not found: ${propertyId}`);
-            return res.status(404).json({
+        try {
+            const { propertyId } = req.params;
+            const userId = req.user?.userId;
+            
+            console.log(`🔍 Property ID: ${propertyId}`);
+            console.log(`📝 User ID: ${userId || 'No auth (public)'}`);
+            
+            let query = { _id: propertyId };
+            if (userId) {
+                query = { _id: propertyId, realtorId: userId };
+            }
+            
+            const property = await Property.findOne(query)
+                .populate('realtorId', 'name email');
+            
+            if (!property) {
+                console.log(`❌ Property not found: ${propertyId}`);
+                return res.status(404).json({
+                    success: false,
+                    message: 'Property not found'
+                });
+            }
+            
+            console.log(`✅ Property found: ${property.title}`);
+            console.log(`✅ Realtor: ${property.realtorId?.name} | ${property.realtorId?.email}`);
+            
+            let amenitiesData = [];
+            if (property.amenities) {
+                if (Array.isArray(property.amenities)) {
+                    amenitiesData = property.amenities;
+                } else if (typeof property.amenities === 'object') {
+                    amenitiesData = property.amenities;
+                }
+            }
+            
+            res.status(200).json({
+                success: true,
+                data: {
+                    _id: property._id,
+                    title: property.title,
+                    description: property.description,
+                    type: property.type,
+                    propertyType: property.propertyType,
+                    price: property.price,
+                    priceDisplay: property.priceDisplay,
+                    location: property.location,
+                    bedrooms: property.bedrooms,
+                    bathrooms: property.bathrooms,
+                    area: property.area,
+                    parking: property.parking,
+                    features: property.features || [],
+                    imageUrl: property.imageUrl,
+                    images: property.images || [],
+                    bedroomImages: property.bedroomImages || [],
+                    bathroomImages: property.bathroomImages || [],
+                    kitchenImages: property.kitchenImages || [],
+                    livingImages: property.livingImages || [],
+                    exteriorImages: property.exteriorImages || [],
+                    builderName: property.realtorId?.name || property.builderName || 'Property Owner',
+                    builderEmail: property.realtorId?.email || '',
+                    amenities: amenitiesData,
+                    yearBuilt: property.yearBuilt,
+                    stories: property.stories,
+                    garageSpaces: property.garageSpaces,
+                    lotSize: property.lotSize,
+                    floodRisk: property.floodRisk,
+                    floodFactor: property.floodFactor,
+                    principalInterest: property.principalInterest,
+                    propertyTax: property.propertyTax,
+                    homeInsurance: property.homeInsurance,
+                    hoaFees: property.hoaFees,
+                    veteransBenefits: property.veteransBenefits,
+                    isNew: property.isNew,
+                    isFeatured: property.isFeatured,
+                    status: property.status,
+                    createdAt: property.createdAt,
+                    updatedAt: property.updatedAt
+                }
+            });
+        } catch (error) {
+            console.error('\n❌ ========== GET PROPERTY BY ID ERROR ==========');
+            console.error('Error message:', error.message);
+            console.error('Error stack:', error.stack);
+            console.error('================================================\n');
+            
+            res.status(500).json({
                 success: false,
-                message: 'Property not found'
+                message: error.message
             });
         }
-        
-        console.log(`✅ Property found: ${property.title}`);
-        console.log(`✅ Realtor: ${property.realtorId?.name} | ${property.realtorId?.email}`);
-        
-        let amenitiesData = [];
-        if (property.amenities) {
-            if (Array.isArray(property.amenities)) {
-                amenitiesData = property.amenities;
-            } else if (typeof property.amenities === 'object') {
-                amenitiesData = property.amenities;
-            }
-        }
-        
-        res.status(200).json({
-            success: true,
-            data: {
-                _id: property._id,
-                title: property.title,
-                description: property.description,
-                type: property.type,
-                propertyType: property.propertyType,
-                price: property.price,
-                priceDisplay: property.priceDisplay,
-                location: property.location,
-                bedrooms: property.bedrooms,
-                bathrooms: property.bathrooms,
-                area: property.area,
-                parking: property.parking,
-                features: property.features || [],
-                imageUrl: property.imageUrl,
-                images: property.images || [],
-                bedroomImages: property.bedroomImages || [],
-                bathroomImages: property.bathroomImages || [],
-                kitchenImages: property.kitchenImages || [],
-                livingImages: property.livingImages || [],
-                exteriorImages: property.exteriorImages || [],
-
-                // ✅ Realtor ka actual naam aur email
-                builderName: property.realtorId?.name || property.builderName || 'Property Owner',
-                builderEmail: property.realtorId?.email || '',
-
-                amenities: amenitiesData,
-                yearBuilt: property.yearBuilt,
-                stories: property.stories,
-                garageSpaces: property.garageSpaces,
-                lotSize: property.lotSize,
-                floodRisk: property.floodRisk,
-                floodFactor: property.floodFactor,
-                principalInterest: property.principalInterest,
-                propertyTax: property.propertyTax,
-                homeInsurance: property.homeInsurance,
-                hoaFees: property.hoaFees,
-                veteransBenefits: property.veteransBenefits,
-                isNew: property.isNew,
-                isFeatured: property.isFeatured,
-                status: property.status,
-                createdAt: property.createdAt,
-                updatedAt: property.updatedAt
-            }
-        });
-    } catch (error) {
-        console.error('\n❌ ========== GET PROPERTY BY ID ERROR ==========');
-        console.error('Error message:', error.message);
-        console.error('Error stack:', error.stack);
-        console.error('================================================\n');
-        
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
     }
-}    async updateProperty(req, res) {
+    
+    async updateProperty(req, res) {
         console.log('\n========== UPDATE PROPERTY START ==========');
         
         try {
@@ -420,7 +504,7 @@ async getPropertyById(req, res) {
             console.log(`🔍 Property ID: ${propertyId}`);
             console.log(`📝 User ID: ${userId}`);
             
-            const existingProperty = await Property.findOne({ _id: propertyId, realtorId: userId }); // ✅ FIX: use realtorId
+            const existingProperty = await Property.findOne({ _id: propertyId, realtorId: userId });
             if (!existingProperty) {
                 console.log(`❌ Property not found: ${propertyId}`);
                 return res.status(404).json({

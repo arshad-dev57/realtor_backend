@@ -7,7 +7,7 @@ const { protect } = require('../middlewares/auth.middleware');
 router.post('/admin/register', AuthController.adminRegister);
 router.post('/admin/login', AuthController.adminLogin);
 router.post('/subscription/create',protect,Subscription.createSubscription);
-router.get('/subscription/check', Subscription.checkSubscription);
+router.get('/subscription/check',protect, Subscription.checkSubscription);
 // ==================== USER ROUTES (Buyer/Realtor) ====================
 router.post('/signup', AuthController.signup);
 router.post('/login', AuthController.login);

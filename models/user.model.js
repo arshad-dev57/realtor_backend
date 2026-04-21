@@ -60,10 +60,10 @@ const userSchema = new mongoose.Schema({
         select: false
     },
     
-    // Step 2 - Role (UPDATED: 'admin' added)
+    // Step 2 - Role
     role: {
         type: String,
-        enum: ['buyer', 'realtor', 'admin', null],  // ✅ 'admin' added
+        enum: ['buyer', 'realtor', 'admin', null],
         default: null
     },
     
@@ -79,6 +79,16 @@ const userSchema = new mongoose.Schema({
         default: null
     },
     
+    // Common Location Fields (for both buyer and realtor)
+    country: {
+        type: String,
+        default: null
+    },
+    city: {
+        type: String,
+        default: null
+    },
+    
     resetPasswordToken: {
         type: String,
         default: null,
@@ -90,16 +100,31 @@ const userSchema = new mongoose.Schema({
     },
 
     // Realtor Specific Fields
-    agencyName: String,
+    agencyName: {
+        type: String,
+        default: null
+    },
     licenseNumber: {
         type: String,
         unique: true,
         sparse: true
     },
-    yearsOfExperience: Number,
-    bio: String,
-    serviceCountry: String,
-    serviceCity: String,
+    yearsOfExperience: {
+        type: Number,
+        default: null
+    },
+    bio: {
+        type: String,
+        default: null
+    },
+    serviceCountry: {
+        type: String,
+        default: null
+    },
+    serviceCity: {
+        type: String,
+        default: null
+    },
     
     // Buyer Specific Fields
     preferences: {

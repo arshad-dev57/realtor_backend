@@ -1,7 +1,5 @@
 const User = require('../models/user.model');
-
 const { sendToUser } = require("../services/onesignal");
-
 const OTP = require('../models/otp.model');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -12,12 +10,10 @@ class AuthController {
 
     // ==================== ADMIN SPECIFIC FUNCTIONS ====================
     
-    // Admin Register - Direct admin create (No role selection needed)
     async adminRegister(req, res) {
         try {
             const { name, email, phone, password, secretKey } = req.body;
             
-            // Secret key verification for security
             const ADMIN_SECRET_KEY = process.env.ADMIN_SECRET_KEY || 'elitecrm_admin_2024';
             
             if (secretKey !== ADMIN_SECRET_KEY) {
@@ -90,7 +86,6 @@ class AuthController {
         }
     }
     
-    // Admin Login - Separate login for admin
     async adminLogin(req, res) {
         try {
             const { email, password } = req.body;
@@ -399,6 +394,9 @@ class AuthController {
     
     async selectRole(req, res) {
         try {
+            console.log('=== SELECT ROLE API CALLED ===');
+            console.log('Request Body:', req.body);
+            
             const { userId, role } = req.body;
             
             if (!userId || !role) {
@@ -416,6 +414,7 @@ class AuthController {
             }
             
             const user = await User.findById(userId);
+            
             if (!user) {
                 return res.status(404).json({
                     success: false,
@@ -437,7 +436,7 @@ class AuthController {
                 { expiresIn: '7d' }
             );
             
-            res.status(200).json({
+            const responseData = {
                 success: true,
                 message: `Role selected as ${role}`,
                 token: token,
@@ -450,11 +449,15 @@ class AuthController {
                     isProfileComplete: user.isProfileComplete,
                     nextStep: 'complete_profile',
                     requiredFields: role === 'realtor' 
-                        ? ['agencyName', 'licenseNumber', 'yearsOfExperience', 'serviceCountry', 'serviceCity']
-                        : ['preferences']
+                        ? ['agencyName', 'licenseNumber', 'yearsOfExperience', 'serviceCountry', 'serviceCity', 'country', 'city']
+                        : ['preferences', 'country', 'city']
                 }
-            });
+            };
+            
+            res.status(200).json(responseData);
+            
         } catch (error) {
+            console.error('=== ERROR IN SELECT ROLE ===');
             res.status(400).json({
                 success: false,
                 message: error.message
@@ -465,7 +468,7 @@ class AuthController {
     async completeBuyerProfile(req, res) {
         try {
             const { userId } = req.params;
-            const { profilePhoto, preferences } = req.body;
+            const { profilePhoto, preferences, country, city } = req.body;
             
             const user = await User.findById(userId);
             if (!user) {
@@ -484,6 +487,8 @@ class AuthController {
             
             if (profilePhoto) user.profilePhoto = profilePhoto;
             if (preferences) user.preferences = preferences;
+            if (country) user.country = country;
+            if (city) user.city = city;
             user.isProfileComplete = true;
             
             await user.save();
@@ -497,7 +502,10 @@ class AuthController {
                     email: user.email,
                     phone: user.phone,
                     role: user.role,
-                    isProfileComplete: user.isProfileComplete
+                    isProfileComplete: user.isProfileComplete,
+                    country: user.country,
+                    city: user.city,
+                    preferences: user.preferences
                 }
             });
         } catch (error) {
@@ -518,13 +526,15 @@ class AuthController {
                 yearsOfExperience,
                 bio,
                 serviceCountry,
-                serviceCity
+                serviceCity,
+                country,
+                city
             } = req.body;
             
-            if (!agencyName || !licenseNumber || !yearsOfExperience || !serviceCountry || !serviceCity) {
+            if (!agencyName || !licenseNumber || !yearsOfExperience || !serviceCountry || !serviceCity || !country || !city) {
                 return res.status(400).json({
                     success: false,
-                    message: 'All realtor fields are required'
+                    message: 'All fields are required: agencyName, licenseNumber, yearsOfExperience, serviceCountry, serviceCity, country, city'
                 });
             }
             
@@ -562,6 +572,8 @@ class AuthController {
             user.bio = bio || '';
             user.serviceCountry = serviceCountry;
             user.serviceCity = serviceCity;
+            user.country = country;
+            user.city = city;
             user.isProfileComplete = true;
             
             await user.save();
@@ -579,104 +591,101 @@ class AuthController {
         }
     }
 
-    // ==================== USER LOGIN (Buyer/Realtor) ====================
-    // authController.js
+    // ==================== USER LOGIN ====================
+    
+    async login(req, res) {
+        try {
+            const { email, password } = req.body;
 
+            if (!email || !password) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Email and password are required'
+                });
+            }
 
-async login(req, res) {
-  try {
-    const { email, password } = req.body;
+            const user = await User.findOne({
+                email,
+                role: { $ne: 'admin' }
+            }).select('+password');
 
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email and password are required'
-      });
-    }
+            if (!user) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Invalid credentials'
+                });
+            }
 
-    const user = await User.findOne({
-      email,
-      role: { $ne: 'admin' }
-    }).select('+password');
+            const isPasswordValid = await user.comparePassword(password);
 
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid credentials'
-      });
-    }
+            if (!isPasswordValid) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Invalid credentials'
+                });
+            }
 
-    const isPasswordValid = await user.comparePassword(password);
+            let requiresPayment = false;
 
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid credentials'
-      });
-    }
+            if (user.role !== 'admin') {
+                requiresPayment =
+                    !user.isSubscribed &&
+                    user.paymentStatus !== 'completed';
+            }
 
-    let requiresPayment = false;
+            const token = jwt.sign(
+                {
+                    userId: user._id,
+                    email: user.email,
+                    name: user.name,
+                    role: user.role
+                },
+                process.env.JWT_SECRET || 'your_secret_key',
+                { expiresIn: '7d' }
+            );
 
-    if (user.role !== 'admin') {
-      requiresPayment =
-        !user.isSubscribed &&
-        user.paymentStatus !== 'completed';
-    }
+            try {
+                await sendToUser({
+                    mongoUserId: user._id.toString(),
+                    title: "Login Successful",
+                    message: `Welcome back ${user.name} 🎉`,
+                    data: {
+                        type: "login_success",
+                        screen: "home"
+                    }
+                });
+                console.log("✅ Login notification sent");
+            } catch (pushErr) {
+                console.log("❌ Push send failed:", pushErr.message);
+            }
 
-    const token = jwt.sign(
-      {
-        userId: user._id,
-        email: user.email,
-        name: user.name,
-        role: user.role
-      },
-      process.env.JWT_SECRET || 'your_secret_key',
-      { expiresIn: '7d' }
-    );
+            return res.status(200).json({
+                success: true,
+                message: 'Login successful',
+                token: token,
+                data: {
+                    userId: user._id,
+                    name: user.name,
+                    email: user.email,
+                    phone: user.phone,
+                    role: user.role,
+                    isProfileComplete: user.isProfileComplete,
+                    requiresPayment: requiresPayment,
+                    isSubscribed: user.isSubscribed,
+                    isAdmin: false,
+                    country: user.country,
+                    city: user.city
+                }
+            });
 
-    /// ===============================
-    /// LOGIN SUCCESS PUSH NOTIFICATION
-    /// ===============================
-    try {
-      await sendToUser({
-        mongoUserId: user._id.toString(),
-        title: "Login Successful",
-        message: `Welcome back ${user.name} 🎉`,
-        data: {
-          type: "login_success",
-          screen: "home"
+        } catch (error) {
+            return res.status(400).json({
+                success: false,
+                message: error.message
+            });
         }
-      });
-
-      console.log("✅ Login notification sent");
-    } catch (pushErr) {
-      console.log("❌ Push send failed:", pushErr.message);
     }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Login successful',
-      token: token,
-      data: {
-        userId: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        isProfileComplete: user.isProfileComplete,
-        requiresPayment: requiresPayment,
-        isSubscribed: user.isSubscribed,
-        isAdmin: false
-      }
-    });
-
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      message: error.message
-    });
-  }
-}
+    
     // ==================== USER PROFILE FUNCTIONS ====================
     
     async getUserStatus(req, res) {
@@ -715,7 +724,9 @@ async login(req, res) {
                     role: user.role,
                     isProfileComplete: user.isProfileComplete,
                     currentStep: step,
-                    nextStep: nextStep
+                    nextStep: nextStep,
+                    country: user.country,
+                    city: user.city
                 }
             });
         } catch (error) {
@@ -747,12 +758,14 @@ async login(req, res) {
                 role: user.role,
                 isProfileComplete: user.isProfileComplete,
                 profilePhoto: user.profilePhoto || null,
+                country: user.country || null,
+                city: user.city || null,
                 createdAt: user.createdAt,
                 updatedAt: user.updatedAt
             };
             
             if (user.role === 'buyer') {
-                profileData.preferences = user.preferences || [];
+                profileData.preferences = user.preferences || {};
             }
             
             if (user.role === 'realtor') {
@@ -783,7 +796,7 @@ async login(req, res) {
             const updates = req.body;
             
             const allowedUpdates = [
-                'name', 'phone', 'profilePhoto', 'bio',
+                'name', 'phone', 'profilePhoto', 'bio', 'country', 'city',
                 'preferences', 'agencyName', 'serviceCountry', 'serviceCity'
             ];
             
