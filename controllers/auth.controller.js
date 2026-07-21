@@ -1,4 +1,6 @@
 const User = require('../models/user.model');
+const Device = require('../models/device.model');
+const TokenBlacklist = require('../models/tokenBlacklist.model');
 const { sendToUser } = require("../services/onesignal");
 const OTP = require('../models/otp.model');
 const bcrypt = require('bcryptjs');
@@ -591,103 +593,160 @@ class AuthController {
         }
     }
 
-    // ==================== USER LOGIN ====================
+    // ==================== USER LOGIN (WITH DEVICE ID & EMAIL) ====================
     
-    async login(req, res) {
-        try {
-            const { email, password } = req.body;
+async login(req, res) {
+    try {
+        const { email, password, deviceId, deviceName, deviceType, os, browser, ipAddress, userAgent } = req.body;
 
-            if (!email || !password) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Email and password are required'
-                });
-            }
-
-            const user = await User.findOne({
-                email,
-                role: { $ne: 'admin' }
-            }).select('+password');
-
-            if (!user) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Invalid credentials'
-                });
-            }
-
-            const isPasswordValid = await user.comparePassword(password);
-
-            if (!isPasswordValid) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Invalid credentials'
-                });
-            }
-
-            let requiresPayment = false;
-
-            if (user.role !== 'admin') {
-                requiresPayment =
-                    !user.isSubscribed &&
-                    user.paymentStatus !== 'completed';
-            }
-
-            const token = jwt.sign(
-                {
-                    userId: user._id,
-                    email: user.email,
-                    name: user.name,
-                    role: user.role
-                },
-                process.env.JWT_SECRET || 'your_secret_key',
-                { expiresIn: '7d' }
-            );
-
-            try {
-                await sendToUser({
-                    mongoUserId: user._id.toString(),
-                    title: "Login Successful",
-                    message: `Welcome back ${user.name} 🎉`,
-                    data: {
-                        type: "login_success",
-                        screen: "home"
-                    }
-                });
-                console.log("✅ Login notification sent");
-            } catch (pushErr) {
-                console.log("❌ Push send failed:", pushErr.message);
-            }
-
-            return res.status(200).json({
-                success: true,
-                message: 'Login successful',
-                token: token,
-                data: {
-                    userId: user._id,
-                    name: user.name,
-                    email: user.email,
-                    phone: user.phone,
-                    role: user.role,
-                    isProfileComplete: user.isProfileComplete,
-                    requiresPayment: requiresPayment,
-                    isSubscribed: user.isSubscribed,
-                    isAdmin: false,
-                    country: user.country,
-                    city: user.city
-                }
-            });
-
-        } catch (error) {
+        if (!email || !password) {
             return res.status(400).json({
                 success: false,
-                message: error.message
+                message: 'Email and password are required'
             });
         }
+
+        const user = await User.findOne({
+            email,
+            role: { $ne: 'admin' }
+        }).select('+password');
+
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid credentials'
+            });
+        }
+
+        const isPasswordValid = await user.comparePassword(password);
+
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid credentials'
+            });
+        }
+
+        let requiresPayment = false;
+
+        if (user.role !== 'admin') {
+            requiresPayment =
+                !user.isSubscribed &&
+                user.paymentStatus !== 'completed';
+        }
+
+        // ✅ CREATE TOKEN WITH DEVICE ID
+        const token = jwt.sign(
+            {
+                userId: user._id,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                deviceId: deviceId || null
+            },
+            process.env.JWT_SECRET || 'your_secret_key',
+            { expiresIn: '30d' }
+        );
+
+        // ✅ REGISTER OR UPDATE DEVICE
+        let registeredDevice = null;
+        if (deviceId) {
+            registeredDevice = await Device.findOneAndUpdate(
+                { userId: user._id, deviceId: deviceId },
+                {
+                    deviceName: deviceName || 'Unknown Device',
+                    deviceType: deviceType || 'desktop',
+                    os: os || 'Unknown',
+                    browser: browser || 'Unknown',
+                    ipAddress: ipAddress || '',
+                    userAgent: userAgent || '',
+                    lastActive: new Date(),
+                    isActive: true
+                },
+                { upsert: true, new: true }
+            );
+            console.log(`✅ Device registered/updated: ${deviceId} for user: ${user._id}`);
+        }
+
+        // ✅ SEND NOTIFICATION & EMAIL IN BACKGROUND (DON'T AWAIT)
+        // This will run in background, won't block the response
+        setTimeout(async () => {
+            try {
+                const deviceInfo = `
+                    <h3>Device Information:</h3>
+                    <ul>
+                        <li><strong>Device:</strong> ${deviceName || 'Unknown Device'}</li>
+                        <li><strong>Type:</strong> ${deviceType || 'desktop'}</li>
+                        <li><strong>OS:</strong> ${os || 'Unknown'}</li>
+                        <li><strong>Browser:</strong> ${browser || 'Unknown'}</li>
+                        <li><strong>IP Address:</strong> ${ipAddress || 'Auto-detected'}</li>
+                        <li><strong>Time:</strong> ${new Date().toLocaleString()}</li>
+                    </ul>
+                `;
+
+                const emailBody = `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                        <div style="background-color: #1A1A1A; padding: 20px; text-align: center; border-radius: 10px;">
+                            <h2 style="color: #B49A64; margin: 0;">🔐 New Login Alert</h2>
+                        </div>
+                        <div style="background-color: #fff; padding: 20px; border-radius: 10px; margin-top: 20px; border: 1px solid #e0e0e0;">
+                            <p>Dear <strong>${user.name}</strong>,</p>
+                            <p>We detected a new login to your account from a new device.</p>
+                            ${deviceInfo}
+                            <p>If this was you, you can ignore this message. If you don't recognize this activity, please secure your account immediately.</p>
+                            <hr style="margin: 20px 0; border: none; border-top: 1px solid #e0e0e0;">
+                            <p style="color: #666; font-size: 12px;">You can manage your devices in the Device Management section of your account.</p>
+                        </div>
+                        <div style="text-align: center; margin-top: 20px; color: #999; font-size: 12px;">
+                            <p>Estate CRM Team</p>
+                        </div>
+                    </div>
+                `;
+
+                // Import sendEmail service
+                const { sendEmail } = require('../services/email.service');
+                
+                await sendEmail({
+                    to: user.email,
+                    subject: `🔐 New Login Detected on ${deviceName || 'New Device'}`,
+                    body: emailBody,
+                    fromEmail: process.env.EMAIL_USER,
+                    fromName: "Estate CRM Security"
+                });
+                console.log(`✅ Login alert email sent to: ${user.email}`);
+            } catch (emailErr) {
+                console.log("❌ Email send failed:", emailErr.message);
+            }
+        }, 0); // Execute in background, don't block response
+
+        // ✅ SEND RESPONSE IMMEDIATELY (don't wait for email)
+        return res.status(200).json({
+            success: true,
+            message: 'Login successful',
+            token: token,
+            data: {
+                userId: user._id,
+                name: user.name,
+                email: user.email,
+                phone: user.phone,
+                role: user.role,
+                isProfileComplete: user.isProfileComplete,
+                requiresPayment: requiresPayment,
+                isSubscribed: user.isSubscribed,
+                isAdmin: false,
+                country: user.country,
+                city: user.city
+            }
+        });
+
+    } catch (error) {
+        console.error('Login error:', error);
+        return res.status(400).json({
+            success: false,
+            message: error.message
+        });
     }
-    
-    // ==================== USER PROFILE FUNCTIONS ====================
-    
+}
     async getUserStatus(req, res) {
         try {
             const { userId } = req.params;

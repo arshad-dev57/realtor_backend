@@ -15,7 +15,10 @@ class App {
         this.initializeMiddlewares();
         this.initializeRoutes();
         this.initializeErrorHandling();
-        this.initializeKeepAlive();
+
+        if (!process.env.VERCEL) {
+            this.initializeKeepAlive();
+        }
     }
 
     initializeMiddlewares() {
@@ -25,7 +28,7 @@ class App {
             origin: '*',
             credentials: true,
             methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-            allowedHeaders: ['Content-Type', 'Authorization']
+            allowedHeaders: ['Content-Type', 'Authorization','X-Device-Id']
         }));
 
         this.app.use(compression());
@@ -71,7 +74,7 @@ class App {
         this.app.use('/api/v1/lead-requests', require('./routes/leadRequest.routes'));
       this.app.use('/api/v1/notifications', require('./routes/notification.routes'));
     this.app.use('/api/v1/admindashboard', require('./routes/admin.dashboard.routes'));
-
+   this.app.use('/api/v1/devices', require('./routes/device.routes'));
 this.app.use('/api/v1/payments', require('./routes/payment.routes'));
         // 404 handler
         this.app.use((req, res) => {

@@ -2,10 +2,9 @@ const router = require('express').Router();
 const LeadRequestController = require('../controllers/leadrequest.controller');
 const { protect } = require('../middlewares/auth.middleware');
 
-// ==================== REALTOR ROUTES ====================
+// ==================== REALTOR ROUTES ==================== 
 router.post('/', protect, LeadRequestController.createRequest);
 router.get('/my-requests', protect, LeadRequestController.getMyRequests);
-
 // ==================== ADMIN ROUTES ====================
 router.get('/', protect, LeadRequestController.getAllRequests);
 router.get('/pending/count', protect, LeadRequestController.getPendingCount);
